@@ -92,6 +92,7 @@
 <main>
 
   <div class="pair">
+    <!-- ★ iOS対策：muted 必須 -->
     <video id="video" playsinline autoplay muted></video>
     <canvas id="canvas"></canvas>
   </div>
@@ -106,7 +107,7 @@
     <hr>
 
     <div class="mono">
-      顔角度 θ: <span id="faceDeg">--</span>°<br>
+      顔角度 θ（下向き＋）: <span id="faceDeg">--</span>°<br>
       スマホ角度 φ: <span id="phoneDeg">--</span>°<br>
       <br>
       <strong>首角度 = θ − φ</strong><br>
@@ -116,7 +117,7 @@
 
 </main>
 
-<!-- MediaPipe FaceMesh（iOS安定版） -->
+<!-- MediaPipe FaceMesh（iOS Safari安定版） -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
@@ -132,7 +133,7 @@ let baseFace = 0;
 let basePhone = 0;
 let calibrated = false;
 
-const FACE_GAIN = 2.0;     // 顔角度の感度（1.5〜3.0）
+const FACE_GAIN = 2.0;   // 顔角度感度（1.5〜3.0で調整）
 const SMOOTH = 0.2;
 
 /* ================= DOM ================= */
@@ -155,7 +156,7 @@ async function startOrientation() {
     typeof DeviceOrientationEvent.requestPermission === "function"
   ) {
     const res = await DeviceOrientationEvent.requestPermission();
-    if (res !== "granted") throw new Error("センサ許可NG");
+    if (res !== "granted") throw new Error("センサ許可が必要です");
   }
   window.addEventListener("deviceorientation", e => {
     if (typeof e.beta === "number") {
@@ -165,7 +166,7 @@ async function startOrientation() {
   });
 }
 
-/* ================= 顔角度 ================= */
+/* ================= 顔角度（符号修正済み） ================= */
 function calcFaceAngle(lm) {
   const nose = lm[1];
   const chin = lm[152];
@@ -173,7 +174,9 @@ function calcFaceAngle(lm) {
   const dz = chin.z - nose.z;
   const dy = chin.y - nose.y;
 
-  let deg = Math.atan2(dz, Math.abs(dy) + 1e-6) * 180 / Math.PI;
+  // ★ 下を向くほど + になるよう符号反転
+  let deg = -Math.atan2(dz, Math.abs(dy) + 1e-6) * 180 / Math.PI;
+
   deg *= FACE_GAIN;
   deg = Math.max(-60, Math.min(60, deg));
 
