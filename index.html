@@ -1,212 +1,484 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>iOS Safari 動作確認（首角度）</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>スマホ姿勢判定（首角度=顔-スマホ）</title>
   <style>
-    body{font-family:system-ui;margin:0;background:#fafafa;color:#111}
-    header{position:sticky;top:0;background:#fff;border-bottom:1px solid #eee;padding:12px}
-    main{padding:12px;display:grid;gap:12px}
-    .card{background:#fff;border:1px solid #eee;border-radius:14px;padding:12px}
-    button{padding:10px 12px;border-radius:10px;border:1px solid #ddd;background:#111;color:#fff;font-weight:700}
-    #wrap{position:relative;aspect-ratio:3/4;border-radius:14px;overflow:hidden;background:#000}
-    video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-    .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
-  </style>
+    :root { --w: 240px; --h: 320px; --radius: 14px; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans JP",
+        "Apple Color Emoji", "Segoe UI Emoji";
+      font-size: 16px; margin: 0; color: #111; background: #fafafa;
+    }
+    header {
+      padding: 12px 16px; background: #fff; border-bottom: 1px solid #eee;
+      position: sticky; top: 0; z-index: 10;
+    }
+    h1 { font-size: 18px; margin: 0; }
+    main { padding: 12px; display: grid; gap: 12px; }
 
-  <!-- ✅ 非module で読み込む（iOSで安定しやすい） -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    @media (min-width: 720px) {
+      .grid { grid-template-columns: 1.2fr 0.8fr; }
+    }
+
+    .card {
+      background: #fff; border: 1px solid #eee; border-radius: var(--radius);
+      padding: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+    .badges { display: flex; gap: 8px; flex-wrap: wrap; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 10px; border-radius: 999px;
+      background: #f3f4f6; border: 1px solid #e5e7eb;
+      font-weight: 600; font-size: 14px;
+    }
+    .badge strong { font-weight: 800; }
+
+    .btn {
+      appearance: none; border: 0; cursor: pointer;
+      padding: 10px 12px; border-radius: 10px;
+      background: #111; color: #fff; font-weight: 700;
+    }
+    .btn.secondary { background: #f3f4f6; color: #111; border: 1px solid #e5e7eb; }
+    .btn:disabled { opacity: .55; cursor: not-allowed; }
+
+    .stage {
+      display: grid; gap: 10px;
+      grid-template-columns: 1fr;
+    }
+    .previewWrap {
+      position: relative;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid #eee;
+      background: #000;
+      aspect-ratio: 3/4;
+      max-height: 70vh;
+    }
+    video, canvas {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+    }
+    .overlay {
+      position: absolute; left: 10px; right: 10px; bottom: 10px;
+      display: grid; gap: 8px;
+      background: rgba(255,255,255,.9);
+      border: 1px solid rgba(0,0,0,.06);
+      border-radius: 12px;
+      padding: 10px;
+      backdrop-filter: blur(6px);
+    }
+    .bigLabel {
+      font-size: 18px; font-weight: 900;
+      display: flex; justify-content: space-between; gap: 8px;
+      align-items: baseline;
+    }
+    .subLabel { font-size: 13px; opacity: .8; }
+
+    .kpi {
+      display: grid; gap: 8px;
+      grid-template-columns: 1fr 1fr;
+    }
+    .kpi .item {
+      border: 1px solid #eee; border-radius: 12px;
+      padding: 10px; background: #fff;
+    }
+    .kpi .item .t { font-size: 12px; opacity: .7; }
+    .kpi .item .v { font-size: 18px; font-weight: 900; margin-top: 4px; }
+
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .note { font-size: 13px; opacity: .8; line-height: 1.45; }
+    .hr { height: 1px; background: #eee; margin: 10px 0; }
+  </style>
 </head>
 <body>
 <header>
-  <div class="row">
-    <button id="btnStart">開始</button>
-    <button id="btnCalib">3秒キャリブ</button>
-    <span id="status" class="mono">未開始</span>
-  </div>
+  <h1>スマホ姿勢判定（首角度＝顔Pitch − スマホPitch）</h1>
 </header>
 
-<main>
-  <section class="card">
-    <div id="wrap">
-      <video id="video" playsinline muted></video>
+<main class="grid">
+  <!-- 左：カメラ＋判定 -->
+  <section class="card stage">
+    <div class="row" style="justify-content:space-between;">
+      <div class="badges">
+        <span class="badge">顔向き: <strong id="faceDir">--</strong></span>
+        <span class="badge">スマホ: <strong id="phoneDir">--</strong></span>
+        <span class="badge">状態: <strong id="postureLabel">--</strong></span>
+      </div>
+      <div class="row">
+        <button class="btn secondary" id="btnStart">開始</button>
+        <button class="btn" id="btnCalib">3秒キャリブ</button>
+      </div>
+    </div>
+
+    <div class="previewWrap">
+      <video id="video" autoplay playsinline muted></video>
       <canvas id="canvas"></canvas>
+
+      <div class="overlay">
+        <div class="bigLabel">
+          <span id="judgeText">--</span>
+          <span class="mono" id="neckAngleDegBig">--°</span>
+        </div>
+        <div class="subLabel" id="calibStatus">未キャリブ（良い姿勢で「3秒キャリブ」）</div>
+      </div>
+    </div>
+
+    <div class="kpi">
+      <div class="item">
+        <div class="t">顔Pitch（度）</div>
+        <div class="v mono" id="facePitchDeg">--</div>
+      </div>
+      <div class="item">
+        <div class="t">スマホPitch beta（度）</div>
+        <div class="v mono" id="phonePitchDeg">--</div>
+      </div>
+      <div class="item">
+        <div class="t">首角度（度）= 顔 − スマホ</div>
+        <div class="v mono" id="neckAngleDeg">--</div>
+      </div>
+      <div class="item">
+        <div class="t">推定方式</div>
+        <div class="v mono" id="modeText">--</div>
+      </div>
     </div>
   </section>
 
+  <!-- 右：説明＆調整 -->
   <section class="card">
-    <div class="row">
-      <div>顔Pitch: <b id="facePitch" class="mono">--</b></div>
-      <div>スマホPitch(beta): <b id="phonePitch" class="mono">--</b></div>
-      <div>首角度: <b id="neckAngle" class="mono">--</b></div>
+    <div class="row" style="justify-content:space-between;">
+      <div style="font-weight:900;">しきい値</div>
+      <div class="mono" id="thText">--</div>
     </div>
-    <div style="margin-top:8px">判定: <b id="judge">--</b></div>
+    <div class="hr"></div>
+
+    <div class="note">
+      <div style="font-weight:800; margin-bottom:6px;">考え方（あなたの図そのまま）</div>
+      <ul style="margin:0; padding-left:18px;">
+        <li><b>顔だけ下</b> → 首角度が増える（曲がり）</li>
+        <li><b>スマホごと下</b> → 顔PitchもスマホPitchも増えるが相殺（まっすぐ扱い）</li>
+      </ul>
+    </div>
+
+    <div class="hr"></div>
+
+    <div class="note">
+      <div style="font-weight:800; margin-bottom:6px;">使い方</div>
+      <ol style="margin:0; padding-left:18px;">
+        <li>「開始」を押す（カメラ起動）</li>
+        <li>良い姿勢でスマホを見る</li>
+        <li>「3秒キャリブ」を押す</li>
+        <li>以降、首角度（度）で判定</li>
+      </ol>
+      <div style="margin-top:10px;">
+        <button class="btn secondary" id="btnReset">キャリブリセット</button>
+      </div>
+    </div>
   </section>
 </main>
 
-<script>
-  const TH_NOTICE = 10, TH_WARN = 20;
+<!-- MediaPipe Tasks Vision (CDN) -->
+<script type="module">
+  import vision from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+  const { FaceLandmarker, FilesetResolver, DrawingUtils } = vision;
 
+  // ====== しきい値（ここを調整） ======
+  const TH_NOTICE = 10;  // 10度〜注意
+  const TH_WARN   = 20;  // 20度〜警告
+  document.getElementById("thText").textContent = `NOTICE=${TH_NOTICE}°, WARN=${TH_WARN}°`;
+
+  // ====== DOM ======
   const video = document.getElementById("video");
   const canvas = document.getElementById("canvas");
   const ctx = canvas.getContext("2d");
 
-  const elStatus = document.getElementById("status");
-  const elFace = document.getElementById("facePitch");
-  const elPhone = document.getElementById("phonePitch");
-  const elNeck = document.getElementById("neckAngle");
-  const elJudge = document.getElementById("judge");
+  const elFacePitch = document.getElementById("facePitchDeg");
+  const elPhonePitch = document.getElementById("phonePitchDeg");
+  const elNeck = document.getElementById("neckAngleDeg");
+  const elNeckBig = document.getElementById("neckAngleDegBig");
+  const elMode = document.getElementById("modeText");
+
+  const elFaceDir = document.getElementById("faceDir");
+  const elPhoneDir = document.getElementById("phoneDir");
+  const elPosture = document.getElementById("postureLabel");
+  const elJudge = document.getElementById("judgeText");
+  const elCalib = document.getElementById("calibStatus");
 
   const btnStart = document.getElementById("btnStart");
   const btnCalib = document.getElementById("btnCalib");
+  const btnReset = document.getElementById("btnReset");
 
+  // ====== 状態 ======
+  let faceLandmarker = null;
+  let drawingUtils = null;
+
+  let running = false;
   let phonePitchDeg = 0;
   let facePitchDeg = 0;
   let neckAngleDeg = 0;
+  let pitchMode = "--";
 
+  // キャリブ基準
   let baseFace = null;
   let basePhone = null;
 
-  let isCal = false, calStart=0, sumF=0, sumP=0, n=0;
-  const CAL_MS = 3000;
+  // キャリブ中
+  let isCalibrating = false;
+  let calibStart = 0;
+  let calibSumFace = 0, calibSumPhone = 0, calibN = 0;
+  const CALIB_MS = 3000;
 
-  function classify(a){
-    a = Math.abs(a);
+  // iOS DeviceOrientation 許可済みか
+  let orientationReady = false;
+
+  function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+
+  // ====== DeviceOrientation ======
+  function onDeviceOri(ev){
+    if (typeof ev.beta === "number") {
+      phonePitchDeg = ev.beta; // 必要なら符号反転: phonePitchDeg = -ev.beta;
+    }
+  }
+
+  async function ensureDeviceOrientation(){
+    if (orientationReady) return true;
+
+    if (typeof DeviceOrientationEvent !== "undefined" &&
+        typeof DeviceOrientationEvent.requestPermission === "function") {
+      // iOS: 必ずユーザー操作内で許可
+      const res = await DeviceOrientationEvent.requestPermission();
+      if (res !== "granted") return false;
+    }
+    window.addEventListener("deviceorientation", onDeviceOri, true);
+    orientationReady = true;
+    return true;
+  }
+
+  // ====== MediaPipe: Pitch 推定 ======
+  // (A) Matrix(16) から pitch を取る（優先）
+  function facePitchFromMatrix4x4(mat){
+    // mat: 16要素
+    // もし向きが逆なら、符号を反転して調整してOK
+    const pitch = Math.atan2(-mat[9], mat[10]) * 180 / Math.PI;
+    return pitch;
+  }
+
+  // (B) landmarks から角度っぽく（fallback）
+  function facePitchFromLandmarks(landmarks){
+    const nose = landmarks[1];
+    const chin = landmarks[152];
+    if (!nose || !chin) return 0;
+    const dz = (chin.z - nose.z);
+    const dy = (chin.y - nose.y);
+    const pitch = Math.atan2(dz, Math.abs(dy) + 1e-6) * 180 / Math.PI;
+    return pitch;
+  }
+
+  function startCalibration(){
+    if (isCalibrating) return;
+    isCalibrating = true;
+    calibStart = performance.now();
+    calibSumFace = 0; calibSumPhone = 0; calibN = 0;
+    elCalib.textContent = "キャリブ中…(3秒)";
+  }
+
+  function updateCalibrationIfNeeded(){
+    if (!isCalibrating) return;
+    const t = performance.now();
+    calibSumFace += facePitchDeg;
+    calibSumPhone += phonePitchDeg;
+    calibN += 1;
+
+    if (t - calibStart >= CALIB_MS) {
+      baseFace = calibSumFace / Math.max(1, calibN);
+      basePhone = calibSumPhone / Math.max(1, calibN);
+      isCalibrating = false;
+      elCalib.textContent = `完了 baseFace=${baseFace.toFixed(1)}°, basePhone=${basePhone.toFixed(1)}°`;
+    }
+  }
+
+  function computeNeckAngle(){
+    const df = (baseFace == null) ? facePitchDeg : (facePitchDeg - baseFace);
+    const dp = (basePhone == null) ? phonePitchDeg : (phonePitchDeg - basePhone);
+    neckAngleDeg = df - dp;
+  }
+
+  function classify(){
+    const a = Math.abs(neckAngleDeg);
     if (a >= TH_WARN) return "曲がっている（警告）";
     if (a >= TH_NOTICE) return "やや曲がり（注意）";
     return "まっすぐ";
   }
 
-  function ensureOrientation(){
-    return new Promise(async (resolve) => {
-      try{
-        if (typeof DeviceOrientationEvent !== "undefined" &&
-            typeof DeviceOrientationEvent.requestPermission === "function") {
-          const r = await DeviceOrientationEvent.requestPermission();
-          if (r !== "granted") return resolve(false);
-        }
-        window.addEventListener("deviceorientation", (ev) => {
-          if (typeof ev.beta === "number") phonePitchDeg = ev.beta; // 逆なら -ev.beta
-        }, true);
-        resolve(true);
-      }catch(e){
-        resolve(false);
-      }
-    });
+  function faceDirText(){
+    // 顔Pitchが大きいほど「下向き」扱い（基準なしでも大体）
+    if (facePitchDeg >= 10) return "下向き";
+    return "正面寄り";
+  }
+  function phoneDirText(){
+    // betaが大きいほど端末を手前に倒してる（人によって符号逆ならここ調整）
+    if (phonePitchDeg >= 10) return "曲がっている";
+    return "まっすぐ";
   }
 
-  function facePitchFromLandmarks(lm){
-    // 鼻(1)と顎(152)を使用（FaceMesh）
-    const nose = lm[1], chin = lm[152];
-    if (!nose || !chin) return 0;
-    const dz = (chin.z - nose.z);
-    const dy = (chin.y - nose.y);
-    return Math.atan2(dz, Math.abs(dy) + 1e-6) * 180 / Math.PI;
-  }
-
-  function updateCal(){
-    if (!isCal) return;
-    const t = performance.now();
-    sumF += facePitchDeg; sumP += phonePitchDeg; n++;
-    if (t - calStart >= CAL_MS){
-      baseFace = sumF / Math.max(1,n);
-      basePhone = sumP / Math.max(1,n);
-      isCal = false;
-      elStatus.textContent = `キャリブ完了 baseFace=${baseFace.toFixed(1)} basePhone=${basePhone.toFixed(1)}`;
-    }
-  }
-
-  function computeNeck(){
-    const df = (baseFace==null) ? facePitchDeg : (facePitchDeg - baseFace);
-    const dp = (basePhone==null) ? phonePitchDeg : (phonePitchDeg - basePhone);
-    neckAngleDeg = df - dp;
-  }
-
-  // MediaPipe FaceMesh
-  const faceMesh = new FaceMesh.FaceMesh({
-    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
-  });
-  faceMesh.setOptions({
-    selfieMode: true,
-    maxNumFaces: 1,
-    refineLandmarks: true,
-    minDetectionConfidence: 0.5,
-    minTrackingConfidence: 0.5
-  });
-
-  faceMesh.onResults((res) => {
-    // canvasサイズ合わせ
-    if (canvas.width !== video.videoWidth) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-    }
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    ctx.drawImage(res.image, 0,0,canvas.width,canvas.height);
-
-    if (res.multiFaceLandmarks && res.multiFaceLandmarks.length > 0){
-      const lm = res.multiFaceLandmarks[0];
-      facePitchDeg = facePitchFromLandmarks(lm);
-
-      drawConnectors(ctx, lm, FACEMESH_TESSELATION, {lineWidth:1});
-    } else {
-      facePitchDeg = 0;
-    }
-
-    updateCal();
-    computeNeck();
-
-    elFace.textContent = facePitchDeg.toFixed(1);
-    elPhone.textContent = phonePitchDeg.toFixed(1);
+  function renderUI(){
+    elFacePitch.textContent = facePitchDeg.toFixed(1);
+    elPhonePitch.textContent = phonePitchDeg.toFixed(1);
     elNeck.textContent = neckAngleDeg.toFixed(1);
-    elJudge.textContent = classify(neckAngleDeg);
-  });
+    elNeckBig.textContent = `${neckAngleDeg.toFixed(1)}°`;
+    elMode.textContent = pitchMode;
 
-  let camera = null;
+    elFaceDir.textContent = faceDirText();
+    elPhoneDir.textContent = phoneDirText();
 
-  btnStart.addEventListener("click", async () => {
-    elStatus.textContent = "開始処理中...";
-    const ok = await ensureOrientation();
-    if (!ok){
-      alert("モーション/傾きセンサの許可が必要です。");
-      elStatus.textContent = "センサ許可NG";
-      return;
+    const label = classify();
+    elPosture.textContent = label;
+    elJudge.textContent = label;
+  }
+
+  async function initFaceLandmarker(){
+    const filesetResolver = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+    );
+
+    faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
+      baseOptions: {
+        modelAssetPath:
+          "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+      },
+      runningMode: "VIDEO",
+      numFaces: 1,
+      outputFaceBlendshapes: false,
+      outputFacialTransformationMatrixes: true
+    });
+
+    drawingUtils = new DrawingUtils(ctx);
+  }
+
+  async function startCamera(){
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: "user",
+        width: { ideal: 720 },
+        height: { ideal: 1280 }
+      },
+      audio: false
+    });
+    video.srcObject = stream;
+
+    await new Promise((resolve) => {
+      video.onloadedmetadata = () => resolve();
+    });
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+  }
+
+  let lastVideoTime = -1;
+  async function loop(){
+    if (!running) return;
+
+    // 描画
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const nowMs = performance.now();
+    if (video.readyState >= 2) {
+      if (video.currentTime !== lastVideoTime) {
+        lastVideoTime = video.currentTime;
+
+        const result = faceLandmarker.detectForVideo(video, nowMs);
+
+        // landmark描画（欲しくなければこのブロック削除OK）
+        if (result.faceLandmarks && result.faceLandmarks.length > 0) {
+          drawingUtils.drawConnectors(
+            result.faceLandmarks[0],
+            FaceLandmarker.FACE_LANDMARKS_TESSELATION,
+            { lineWidth: 1 }
+          );
+        }
+
+        // 顔Pitch推定
+        pitchMode = "--";
+        if (result.facialTransformationMatrixes && result.facialTransformationMatrixes.length > 0) {
+          // data が Float32Array(16) で来る
+          const mat = result.facialTransformationMatrixes[0].data;
+          facePitchDeg = facePitchFromMatrix4x4(mat);
+          pitchMode = "matrix";
+        } else if (result.faceLandmarks && result.faceLandmarks.length > 0) {
+          facePitchDeg = facePitchFromLandmarks(result.faceLandmarks[0]);
+          pitchMode = "landmarks";
+        } else {
+          facePitchDeg = 0;
+          pitchMode = "no-face";
+        }
+
+        // キャリブ＆首角度
+        updateCalibrationIfNeeded();
+        computeNeckAngle();
+        renderUI();
+      }
     }
 
-    try{
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video:{facingMode:"user", width:{ideal:720}, height:{ideal:1280}},
-        audio:false
-      });
-      video.srcObject = stream;
-      await video.play();
+    requestAnimationFrame(loop);
+  }
 
-      camera = new Camera(video, {
-        onFrame: async () => { await faceMesh.send({image: video}); },
-        width: 720, height: 1280
-      });
-      camera.start();
-      elStatus.textContent = "実行中";
-    }catch(e){
+  // ====== ボタン ======
+  btnStart.addEventListener("click", async () => {
+    try {
+      btnStart.disabled = true;
+
+      // iOS対策：DeviceOrientation許可
+      const okOri = await ensureDeviceOrientation();
+      if (!okOri) {
+        alert("傾きセンサ（DeviceOrientation）の許可が必要です。");
+        btnStart.disabled = false;
+        return;
+      }
+
+      if (!faceLandmarker) await initFaceLandmarker();
+      await startCamera();
+
+      running = true;
+      loop();
+
+      btnStart.textContent = "実行中";
+    } catch (e) {
       console.error(e);
-      alert("カメラ開始失敗: " + e);
-      elStatus.textContent = "カメラ開始失敗";
+      alert("開始に失敗: " + e);
+      btnStart.disabled = false;
+      btnStart.textContent = "開始";
     }
   });
 
   btnCalib.addEventListener("click", async () => {
-    const ok = await ensureOrientation();
-    if (!ok){
-      alert("モーション/傾きセンサの許可が必要です。");
+    // iOSでまだ許可してない場合はここでも許可を取る
+    const okOri = await ensureDeviceOrientation();
+    if (!okOri) {
+      alert("傾きセンサ（DeviceOrientation）の許可が必要です。");
       return;
     }
-    isCal = true; calStart = performance.now();
-    sumF=0; sumP=0; n=0;
-    elStatus.textContent = "キャリブ中…(3秒)";
+    startCalibration();
   });
+
+  btnReset.addEventListener("click", () => {
+    baseFace = null;
+    basePhone = null;
+    isCalibrating = false;
+    elCalib.textContent = "未キャリブ（良い姿勢で「3秒キャリブ」）";
+  });
+
+  // 起動時の表示
+  renderUI();
 </script>
 </body>
 </html>
